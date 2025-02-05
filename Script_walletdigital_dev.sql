@@ -30,7 +30,7 @@ create table if not exists carteiras (
     saldo DECIMAL(10,2) default 0.0,
     senha_transacao char(4) CHECK(length(senha_transacao) = 4),
     limite_maximo decimal(10,2) check(limite_maximo <= 20000),
-    tipo_conta varchar(10) check(tipo_conta in('poupança', 'corrente')),
+    tipo_conta varchar(10) check(tipo_conta in('poupanca', 'corrente')),
     data_criacao TIMESTAMP default CURRENT_TIMESTAMP,
     foreign key(cliente_id) REFERENCES clientes(cliente_id) ON DELETE CASCADE
 );
@@ -100,15 +100,15 @@ values
 insert into carteiras(cliente_id, senha_transacao, limite_maximo, tipo_conta)
 values 
     (1, '0000', 20000.00, 'corrente'),
-    (2, '0000', 20000.00, 'poupança'),
+    (2, '0000', 20000.00, 'poupanca'),
     (3, '0000', 20000.00, 'corrente'),
-    (4, '0000', 20000.00, 'poupança'),
+    (4, '0000', 20000.00, 'poupanca'),
     (5, '0000', 20000.00, 'corrente'),
-    (6, '0000', 20000.00, 'poupança'),
+    (6, '0000', 20000.00, 'poupanca'),
     (7, '0000', 20000.00, 'corrente'),
-    (8, '0000', 20000.00, 'poupança'),
+    (8, '0000', 20000.00, 'poupanca'),
     (9, '0000', 20000.00, 'corrente'),
-    (10, '0000', 20000.00, 'poupança');
+    (10, '0000', 20000.00, 'poupanca');
 
 -- Finaliza a transação de inserção de dados
 commit;
