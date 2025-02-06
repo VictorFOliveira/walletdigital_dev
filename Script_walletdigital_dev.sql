@@ -35,14 +35,24 @@ create table if not exists carteiras (
     foreign key(cliente_id) REFERENCES clientes(cliente_id) ON DELETE CASCADE
 );
 
+create table if not exists Deposito(
+    deposito_id serial primary key,
+    carteira_id integer not null,
+    valor_depositado decimal(10,2) check(valor_depositado >=0) not null,
+    data_deposito TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    data_que_caiu date,
+    foreign key(carteira_id) REFERENCES carteiras(carteira_id) ON DELETE CASCADE
+);
+
 -- Tabela de transações
 create table if not exists transacoes (
     transacao_id serial primary key,
     conta_origem_id integer not null,
     conta_destino_id integer not null,
     valor_transferido decimal(10,2) not null check(valor_transferido > 0.0),
+    senha_conta_origem char(4) check(length(senha_conta_origem) = 4),
     data_transferencia TIMESTAMP default CURRENT_TIMESTAMP,
-    status_transferencia varchar(20) check (status_transferencia in('completo', 'cancelada')) not null,
+    status_transferencia varchar(20) check (status_transferencia in('completo', 'cancelada')),
     metodo_transferencia char(3) check(metodo_transferencia in ('pix', 'doc', 'ted')) not null,
     foreign key(conta_origem_id) REFERENCES carteiras(carteira_id) ON DELETE CASCADE,
     foreign key(conta_destino_id) REFERENCES carteiras(carteira_id) ON DELETE CASCADE 
@@ -113,6 +123,18 @@ values
 -- Finaliza a transação de inserção de dados
 commit;
 
+
+-- ************* INDICES ******************** --
+create INDEX idx_telefone on clientes(telefone);
+create INDEX idx_email_null on clientes(email);
+create UNIQUE INDEX idx_cpf on clientes(cpf);
+-- criando indices carteiras
+create INDEX idx_tipo_conta on carteiras(tipo_conta);
+-- criando indices transacoes
+create INDEX idx_status_transferencia on transacoes(status_transferencia);
+create index idx_valor_transferido on transacoes(valor_transferido);
+
+
 -- ** 6. Revogar Acessos (Quando Necessário) **
 
 -- Exemplo de revogação de privilégios
@@ -120,3 +142,201 @@ commit;
 -- revoke all privileges on all tables in schema public from victor_oliveira;
 -- revoke connect on database walletdigital_dev from victor_oliveira;
 -- revoke usage on schema public from victor_oliveira;
+
+
+-- ******************* TRIGGERS ************************** --
+-- TRIGGER que atualiza as carteiras após a transação -- 
+create or replace function atualizar_contas_transferencias()
+returns trigger as $$
+BEGIN
+
+update carteiras
+set saldo = saldo + NEW.valor_transferido
+where carteira_id = NEW.conta_destino_id;
+
+update carteiras
+set saldo = saldo - New.valor_transferido
+where carteira_id = New.valor_transferido;
+
+return new;
+end;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_atualizar_contas
+AFTER INSERT ON transacoes
+FOR EACH ROW
+EXECUTE FUNCTION atualizar_contas_transferencia();
+
+--  trigger de deposito 
+
+create or replace function atualiza_conta_deposito()
+returns trigger as $$
+
+begin 
+    update carteiras
+    set saldo = saldo + NEW.valor_depositado
+    where carteira_id = NEW.carteira_id;
+
+    update deposito
+    set data_que_caiu = current_date + interval '3 days'
+    where carteira_id = new.carteira_id;
+
+    return new;
+    end;
+    $$language plpgsql;
+
+
+CREATE TRIGGER trigger_atualiza_conta_deposito
+AFTER INSERT ON Deposito
+FOR EACH ROW
+EXECUTE FUNCTION atualiza_conta_deposito();
+
+
+-- TRIGGER para garantir que o saldo em conta seja suficente
+create or replace function verificar_saldo_origem()
+returns trigger as $$
+
+BEGIN
+
+    if (SELECT saldo from carteiras where carteira_id = NEW.conta_origem_id) < new.valor_transferido THEN
+
+        UPDATE transacoes
+        set status_transferencia = 'cancelada'
+        where transacao_id = NEW.transacao_id;
+
+
+        RAISE EXCEPTION 'Saldo insuficiente para a transação';
+    
+    ELSE
+        UPDATE transacoes
+        set status_transferencia = 'completo'
+        where transacao_id = NEW.transacao_id;
+
+
+        end if;
+        return new;
+    end;
+    $$ language PLPGSQL;
+
+CREATE TRIGGER trigger_verificar_saldo_origem
+BEFORE INSERT ON transacoes
+FOR EACH ROW
+EXECUTE FUNCTION verificar_saldo_origem();
+
+-- TRIGGER QUE VERIFICA A SENHA DA CONTA ANTES DE REALIZAR A TRANSFERENCIA -- 
+
+create or replace function verificar_senha_conta_origem()
+returns trigger as $$
+begin 
+
+if(select senha_transacao from carteiras where carteira_id = new.conta_origem_id) != new.senha_conta_origem THEN
+
+        raise EXCEPTION 'Senha incorreta para realizar transferência';
+    
+end if;
+return new;
+end;
+$$ language plpgsql;
+
+CREATE TRIGGER trigger_verificar_senha_conta_origem
+BEFORE INSERT ON transacoes
+FOR EACH ROW
+EXECUTE FUNCTION verificar_senha_conta_origem();
+
+
+-- ************ Criação de procedures ************* --  
+-- Inserindo clientes
+create or replace procedure insert_cliente(
+    -- dados criação do cliente
+    p_nome varchar,
+    p_cpf varchar,
+    p_senha varchar,
+    p_telefone varchar,
+    p_email varchar,
+)
+language PLPGSQL
+as $$
+
+DECLARE
+v_cliente_id integer;
+
+begin 
+
+    INSERT INTO CLIENTES(nome, cpf, senha, telefone, email)
+    values(p_nome, p_cpf, p_senha, p_telefone, p_email)
+    RETURNING cliente_id into v_cliente_id;
+
+    raise notice ' Novo cliente inserido com o ID %', v_cliente_id;
+
+    end;
+    $$;
+
+----------------------------------
+    
+create or replace procedure insert_carteira(
+    p_cliente_id integer,
+    p_senha_transacao char,
+    p_limite_maximo decimal,
+    p_tipo_conta varchar    
+)
+language plpgsql
+as $$
+
+DECLARE
+v_carteira_id integer;
+
+BEGIN
+INSERT INTO CARTEIRAS(cliente_id, senha_transacao, limite_maximo, tipo_conta)
+values(p_cliente_id, p_senha_transacao, p_limite_maximo, p_tipo_conta)
+returning carteira_id into v_carteira_id;
+
+raise notice 'Nova Carteira inserida com o ID %', v_carteira_id;
+end;
+$$;
+
+------------------------------------
+
+create or replace procedure insert_transacao(
+    p_conta_origem_id integer,
+    p_conta_destino_id integer,
+    p_valor_transferido decimal,
+    p_senha_conta_origem char,
+    p_metodo_transferencia CHAR
+)
+
+LANGUAGE plpgsql
+as $$
+DECLARE
+v_transacao_id integer;
+
+begin 
+INSERT INTO transacoes(conta_origem_id, conta_destino_id, valor_transferido, senha_conta_origem,metodo_transferencia)
+values(p_conta_origem_id, p_conta_destino_id, p_valor_transferido, p_senha_conta_origem, p_metodo_transferencia)
+returning transacao_id into v_transacao_id;
+
+raise notice 'Transação efetivada com o id %', v_transacao_id;
+
+end;
+$$;
+
+---------------------------------------------- 
+ 
+create or replace procedure insert_deposito(
+    p_carteira_id integer,
+    p_valor decimal
+)
+language plpgsql
+as $$
+DECLARE
+v_deposito_id integer;
+
+begin 
+insert into deposito(carteira_id, valor_depositado)
+values(p_carteira_id, p_valor)
+RETURNING deposito_id into v_deposito_id;
+
+raise notice 'Deposito realizado com o ID %', v_deposito_id;
+end;
+$$;
+
+
