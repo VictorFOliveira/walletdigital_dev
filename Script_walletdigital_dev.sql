@@ -11,6 +11,18 @@ begin;
 
 -- ** 3. Criação das TabelAS **
 
+-- Tabela de Auditoria
+
+create table if not exists Auditoria(
+    auditoria_id serial primary key,
+    acao varchar(10) check(acao in('INSERT', 'UPDATE','DELETE')),
+    tabela_afetada varchar(50),
+    usuario varchar(50),
+    data_acao TIMESTAMP default current_timestamp,
+    dados_antigos jsonb,
+    dados_novos jsonb
+);
+
 -- Tabela de clientes
 create table if not exists clientes (
     cliente_id serial primary key,
@@ -244,6 +256,101 @@ FOR EACH ROW
 EXECUTE FUNCTION verificar_senha_conta_origem();
 
 
+-- TRIGGER AUDITORIA --
+
+create or replace function auditoria_insercao()
+returns trigger as $$
+begin 
+    insert into auditoria(acao, tabela_afetada, usuario, dados_novos)
+    values('INSERT', TG_TABLE_NAME, CURRENT_USER, to_jsonb(new));
+    return new;
+    end;
+    $$ language plpgsql;
+
+
+create trigger trigger_auditoria_insercao
+after insert on clientes
+for EACH ROW
+EXECUTE function auditoria_insercao();
+
+create trigger trigger_auditoria_insercao_carteiras
+after insert on carteiras
+for EACH row
+execute function auditoria_insercao();
+
+create trigger trigger_auditoria_insercao_transacao
+after insert on transacoes
+for each row
+execute function auditoria_insercao();
+
+create trigger trigger_auditoria_insercao_deposito
+after insert on deposito
+for each row
+execute function auditoria_insercao();
+
+--- trigger atualização --- 
+create or replace function auditoria_atualizacao()
+return trigger as $$
+begin 
+insert into auditoria(acao, tabela_afetada, usuario,dados antigos, dados_novos)
+values('UPDATE', TG_TABLE_NAME, CURRENT_USER,to_jsonb(old), to_jsonb(new));
+return new;
+end;
+$$ language PLPGSQL;
+
+-- trigger atualização -- 
+CREATE TRIGGER trigger_auditoria_atualizacao_clientes
+AFTER UPDATE ON clientes
+FOR EACH ROW
+EXECUTE FUNCTION auditoria_atualizacao();
+
+CREATE TRIGGER trigger_auditoria_atualizacao_carteiras
+AFTER UPDATE ON carteiras
+FOR EACH ROW
+EXECUTE FUNCTION auditoria_atualizacao();
+
+CREATE TRIGGER trigger_auditoria_atualizacao_transacoes
+after update on transacoes
+for each row
+execute function auditoria_atualizacao();
+
+create trigger trigger_auditoria_atualizaca_deposito
+after update on deposito
+for each row
+execute function auditoria_atualizacao();
+
+
+-- trigger deleção --
+create or replace function auditoria_exclusao()
+returns trigger as $$
+begin 
+insert into auditoria(acao, tabela_afetada, usuario, dados_antigos)
+values('DELETE', TG_TABLE_NAME, CURRENT_USER, to_jsonb(old));
+return old;
+end;
+$$ language plpgsql;
+
+CREATE TRIGGER trigger_auditoria_exclusao_clientes
+AFTER DELETE ON clientes
+FOR EACH ROW
+EXECUTE FUNCTION auditoria_exclusao();
+
+CREATE TRIGGER trigger_auditoria_exclusao_carteiras
+AFTER DELETE ON carteiras
+FOR EACH ROW
+EXECUTE FUNCTION auditoria_exclusao(); 
+
+create trigger trigger_auditoria_exclusao_transacoes
+after delete transacoes 
+for each row
+execute function auditoria_exclusao();
+
+create trigger trigger_auditoria_exclusao_deposito
+after delete deposito
+for each row
+execute function auditoria_exclusao();
+
+
 -- ************ Criação de procedures ************* --  
 -- Inserindo clientes
 create or replace procedure insert_cliente(
@@ -338,5 +445,3 @@ RETURNING deposito_id into v_deposito_id;
 raise notice 'Deposito realizado com o ID %', v_deposito_id;
 end;
 $$;
-
-
